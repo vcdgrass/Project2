@@ -1,0 +1,166 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+// ==========================================
+// 1. ENUMS (Các tập giá trị cố định)
+// ==========================================
+
+enum Role {
+  ADMIN
+  OWNER
+  CUSTOMER
+}
+
+enum ClusterStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+enum CourtActiveStatus {
+  ACTIVE
+  MAINTENANCE
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+// ==========================================
+// 2. MODELS (Các bảng trong cơ sở dữ liệu)
+// ==========================================
+
+model User {
+  id          Int            @id @default(autoincrement())
+  email       String         @unique // Sử dụng email làm định danh duy nhất để đăng nhập
+  password    String
+  fullName    String
+  phoneNumber String         @unique
+  role        Role           @default(CUSTOMER)
+  
+  // Quan hệ
+  clusters    CourtCluster[] // Một Owner quản lý nhiều Cụm sân
+  bookings    Booking[]      // Một Customer có nhiều Đơn đặt sân
+  
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+model CourtCluster {
+  id          Int            @id @default(autoincrement())
+  ownerId     Int
+  name        String
+  address     String
+  province    String
+  description String?
+  images      String[]
+  openTime    String         // VD: "05:00"
+  closeTime   String         // VD: "23:00"
+  status      ClusterStatus  @default(PENDING_APPROVAL)
+  
+  // Quan hệ
+  owner       User           @relation(fields: [ownerId], references: [id])
+  courts      Court[]
+  slots       Slot[]
+  
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  // Đánh chỉ mục để lọc danh sách sân theo tỉnh thành nhanh hơn
+  @@index([province])
+  @@index([status])
+}
+
+model Court {
+  id          Int               @id @default(autoincrement())
+  clusterId   Int
+  courtName   String            // VD: "Sân số 1"
+  status      CourtActiveStatus @default(ACTIVE)
+  
+  // Quan hệ
+  cluster     CourtCluster      @relation(fields: [clusterId], references: [id])
+  bookings    Booking[]
+  
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+// Bảng cấu hình giá và khung giờ (Gắn chung cho cả Cụm sân)
+model Slot {
+  id          Int          @id @default(autoincrement())
+  clusterId   Int
+  startTime   String       // VD: "17:00"
+  endTime     String       // VD: "18:00"
+  price       Float
+  isWeekend   Boolean      @default(false)
+  
+  // Quan hệ
+  cluster     CourtCluster @relation(fields: [clusterId], references: [id])
+  bookings    Booking[]
+}
+
+model Booking {
+  id          Int           @id @default(autoincrement())
+  userId      Int
+  courtId     Int
+  slotId      Int
+  bookingDate DateTime      // Ngày khách đến chơi (bỏ phần giờ)
+  totalPrice  Float
+  status      BookingStatus @default(PENDING)
+  
+  // Quan hệ
+  user        User          @relation(fields: [userId], references: [id])
+  court       Court         @relation(fields: [courtId], references: [id])
+  slot        Slot          @relation(fields: [slotId], references: [id])
+  payment     Payment?      // 1 Booking có 1 Payment
+  
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Chỉ mục tối quan trọng để thuật toán chống trùng lịch chạy nhanh
+  @@index([courtId, slotId, bookingDate])
+  @@index([userId])
+}
+
+model Payment {
+  id            Int           @id @default(autoincrement())
+  bookingId     Int           @unique
+  amount        Float
+  status        PaymentStatus @default(PENDING)
+  transactionNo String?       // Mã giao dịch từ ví điện tử trả về
+  paymentMethod String        // VD: "VNPAY", "MOMO", "CASH"
+  
+  // Quan hệ
+  booking       Booking       @relation(fields: [bookingId], references: [id])
+  
+  createdAt     DateTime      @default(now())
+}
+
+model SystemConfig {
+  key         String   @id // Khóa cấu hình (VD: "BOOKING_TIMEOUT_MINS")
+  value       String   // Giá trị
+  description String?
+  updatedAt   DateTime @updatedAt
+}
